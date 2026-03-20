@@ -1,0 +1,13 @@
+{
+  "name": "attendance-frontend",
+  "version": "1.0.0",
+  "description": "Unit Attendance System - Frontend",
+  "private": true,
+  "scripts": {
+    "start": "python -m http.server 3000",
+    "build": "echo 'Frontend is static HTML/CSS/JS'"
+  },
+  "keywords": ["attendance", "system"],
+  "author": "",
+  "license": "MIT"
+}

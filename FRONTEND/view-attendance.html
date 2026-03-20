@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Attendance - Unit Attendance System</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">ATTENDANCE</div>
+            <div class="header-right">
+                <span id="userDisplay" class="text-muted"></span>
+                <button id="backBtn" class="btn btn-secondary btn-sm">← Back</button>
+                <button id="logoutBtn" class="btn btn-danger btn-sm">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div class="card">
+            <div class="card-header">Attendance Records</div>
+
+            <div id="alertContainer"></div>
+
+            <!-- Details -->
+            <div class="grid grid-4 mb-4">
+                <div class="form-group">
+                    <label>Class</label>
+                    <div class="p-2" style="background: var(--gray-100); border-radius: var(--border-radius);">
+                        <span id="className" class="text-bold">-</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Unit</label>
+                    <div class="p-2" style="background: var(--gray-100); border-radius: var(--border-radius);">
+                        <span id="unitName" class="text-bold">-</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Week</label>
+                    <div class="p-2" style="background: var(--gray-100); border-radius: var(--border-radius);">
+                        <span id="weekName" class="text-bold">-</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Lesson</label>
+                    <div class="p-2" style="background: var(--gray-100); border-radius: var(--border-radius);">
+                        <span id="lessonName" class="text-bold">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics -->
+            <div class="grid grid-3 mb-4">
+                <div class="card" style="border-left: 4px solid var(--secondary-color);">
+                    <div class="text-bold">Total Present</div>
+                    <div style="font-size: 2rem; color: var(--secondary-color); margin: 0.5rem 0;">
+                        <span id="presentCount">0</span>
+                    </div>
+                </div>
+
+                <div class="card" style="border-left: 4px solid var(--danger-color);">
+                    <div class="text-bold">Total Absent</div>
+                    <div style="font-size: 2rem; color: var(--danger-color); margin: 0.5rem 0;">
+                        <span id="absentCount">0</span>
+                    </div>
+                </div>
+
+                <div class="card" style="border-left: 4px solid var(--primary-color);">
+                    <div class="text-bold">Attendance Rate</div>
+                    <div style="font-size: 2rem; color: var(--primary-color); margin: 0.5rem 0;">
+                        <span id="attendanceRate">0</span>%
+                    </div>
+                </div>
+            </div>
+
+            <!-- Records Table -->
+            <div class="mb-4">
+                <h3 class="text-bold mb-2">Attendance Details</h3>
+                <div style="overflow-x: auto;">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th style="min-width: 100px;">Admission No.</th>
+                                <th>Student Name</th>
+                                <th style="text-align: center; width: 100px;">Status</th>
+                                <th style="text-align: center; width: 100px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recordsList">
+                            <tr>
+                                <td colspan="4" class="text-center text-muted">
+                                    Loading records...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Export Button -->
+            <div style="display: flex; gap: 1rem;">
+                <button class="btn btn-primary" onclick="exportToCSV()">
+                    ↓ Export to CSV
+                </button>
+                <button class="btn btn-secondary" onclick="printRecords()">
+                    🖨️ Print
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+
+    <script>
+        // Global state
+        let attendanceRecords = [];
+        let currentParams = {};
+
+        /**
+         * Initialize page
+         */
+        async function initPage() {
+            // Check authentication
+            if (!Utils.requireAuth()) return;
+
+            // Get URL parameters
+            const params = new URLSearchParams(window.location.search);
+            currentParams = {
+                classId: params.get('classId'),
+                unitId: params.get('unitId'),
+                week: params.get('week'),
+                lesson: params.get('lesson')
+            };
+
+            // Display parameters
+            document.getElementById('classId').textContent = currentParams.classId;
+            document.getElementById('unitName').textContent = `Unit ${currentParams.unitId}`;
+            document.getElementById('weekName').textContent = `Week ${currentParams.week}`;
+            document.getElementById('lessonName').textContent = currentParams.lesson;
+
+            // Load attendance records
+            await loadAttendance();
+        }
+
+        /**
+         * Load attendance records
+         */
+        async function loadAttendance() {
+            try {
+                const response = await ApiModule.getClassAttendance(
+                    currentParams.classId,
+                    currentParams.unitId,
+                    currentParams.week,
+                    currentParams.lesson
+                );
+
+                attendanceRecords = response.records;
+                renderRecords();
+                calculateStatistics();
+            } catch (error) {
+                showAlert('Error loading attendance: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Render attendance records
+         */
+        function renderRecords() {
+            const tbody = document.getElementById('recordsList');
+
+            if (attendanceRecords.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No records found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = attendanceRecords.map(record => {
+                const statusBadge = record.status === 'present' 
+                    ? '<span style="background: var(--success-bg); color: #065f46; padding: 0.5rem 1rem; border-radius: var(--border-radius); font-weight: 600;">✓ Present</span>'
+                    : '<span style="background: var(--danger-bg); color: #7f1d1d; padding: 0.5rem 1rem; border-radius: var(--border-radius); font-weight: 600;">✕ Absent</span>';
+
+                return `
+                    <tr>
+                        <td>${record.students?.admission_number || '-'}</td>
+                        <td>${record.students?.full_name || '-'}</td>
+                        <td style="text-align: center;">${statusBadge}</td>
+                        <td style="text-align: center;">
+                            <button 
+                                class="btn btn-sm btn-secondary"
+                                onclick="editRecord(${record.id})"
+                            >
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Calculate statistics
+         */
+        function calculateStatistics() {
+            const presentCount = attendanceRecords.filter(r => r.status === 'present').length;
+            const absentCount = attendanceRecords.filter(r => r.status === 'absent').length;
+            const total = attendanceRecords.length;
+
+            const attendanceRate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+
+            document.getElementById('presentCount').textContent = presentCount;
+            document.getElementById('absentCount').textContent = absentCount;
+            document.getElementById('attendanceRate').textContent = attendanceRate;
+        }
+
+        /**
+         * Edit attendance record
+         */
+        async function editRecord(recordId) {
+            const newStatus = prompt('Enter status (present/absent):');
+            
+            if (!newStatus || !['present', 'absent'].includes(newStatus)) {
+                showAlert('Invalid status. Use "present" or "absent".', 'warning');
+                return;
+            }
+
+            try {
+                await ApiModule.updateAttendance(recordId, newStatus);
+                showAlert('Record updated successfully!', 'success');
+                await loadAttendance();
+            } catch (error) {
+                showAlert('Error updating record: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Export to CSV
+         */
+        function exportToCSV() {
+            const csv = [
+                ['Admission No.', 'Student Name', 'Status', 'Date'].join(','),
+                ...attendanceRecords.map(r => 
+                    [
+                        r.students?.admission_number || '',
+                        r.students?.full_name || '',
+                        r.status,
+                        new Date().toLocaleDateString()
+                    ].join(',')
+                )
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `attendance-${currentParams.week}-${currentParams.lesson}.csv`;
+            link.click();
+        }
+
+        /**
+         * Print records
+         */
+        function printRecords() {
+            window.print();
+        }
+
+        /**
+         * Show alert
+         */
+        function showAlert(message, type = 'info') {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        /**
+         * Logout
+         */
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await AuthModule.logout();
+            window.location.href = 'index.html';
+        });
+
+        /**
+         * Back button
+         */
+        document.getElementById('backBtn').addEventListener('click', () => {
+            window.location.href = 'dashboard.html';
+        });
+
+        // Initialize
+        initPage();
+    </script>
+</body>
+</html>

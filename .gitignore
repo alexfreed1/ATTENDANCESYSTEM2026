@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Environment Variables (Do not upload secrets)
+.env
+.env.local
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

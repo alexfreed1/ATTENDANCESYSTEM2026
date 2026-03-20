@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Unit Attendance System</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">ATTENDANCE</div>
+            <div class="header-right">
+                <span id="userDisplay" class="text-muted"></span>
+                <button id="logoutBtn" class="btn btn-danger btn-sm">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div class="card">
+            <div class="card-header">Mark Attendance</div>
+
+            <div id="alertContainer"></div>
+
+            <!-- Filters -->
+            <div class="grid grid-4 mb-4">
+                <div class="form-group">
+                    <label for="departmentSelect">Department</label>
+                    <select id="departmentSelect" onchange="onDepartmentChange()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="classSelect">Class</label>
+                    <select id="classSelect" onchange="onFilterChange()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="unitSelect">Unit</label>
+                    <select id="unitSelect" onchange="onFilterChange()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="weekSelect">Week</label>
+                    <select id="weekSelect" onchange="onFilterChange()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-4 mb-4">
+                <div class="form-group">
+                    <label for="lessonSelect">Lesson</label>
+                    <select id="lessonSelect" onchange="onFilterChange()">
+                        <option value="">-- Select --</option>
+                        <option value="L1">Lesson 1 (L1)</option>
+                        <option value="L2">Lesson 2 (L2)</option>
+                        <option value="L3">Lesson 3 (L3)</option>
+                        <option value="L4">Lesson 4 (L4)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Students Table -->
+            <div class="mb-4">
+                <h3 class="text-bold mb-2">Students</h3>
+                <div id="studentTableContainer" style="overflow-x: auto;">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th style="min-width: 100px;">Admission No.</th>
+                                <th>Student Name</th>
+                                <th style="text-align: center; width: 80px;">
+                                    <div style="font-size: 1.5rem;">✓</div>
+                                    <span style="font-size: 0.75rem;">Present</span>
+                                </th>
+                                <th style="text-align: center; width: 80px;">
+                                    <div style="font-size: 1.5rem;">✕</div>
+                                    <span style="font-size: 0.75rem;">Absent</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="studentList">
+                            <tr>
+                                <td colspan="4" class="text-center text-muted">
+                                    Select filters to view students
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex" style="gap: 1rem;">
+                <button id="viewBtn" class="btn btn-secondary" onclick="viewAttendance()">
+                    View Attendance
+                </button>
+                <button id="submitBtn" class="btn btn-success" onclick="submitAttendance()">
+                    Submit Attendance
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+
+    <script>
+        // Global state
+        let attendanceData = {};
+        let currentUser = null;
+
+        /**
+         * Initialize page
+         */
+        async function initPage() {
+            // Check authentication
+            if (!Utils.requireAuth()) return;
+
+            // Get current user
+            currentUser = Utils.getCurrentUser();
+            document.getElementById('userDisplay').textContent = `${currentUser.email}`;
+
+            // Load departments
+            await loadDepartments();
+        }
+
+        /**
+         * Load departments
+         */
+        async function loadDepartments() {
+            try {
+                const response = await ApiModule.getDepartments();
+                const select = document.getElementById('departmentSelect');
+
+                response.departments.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept.id;
+                    option.textContent = dept.name;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                showAlert('Error loading departments: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Load classes for selected department
+         */
+        async function onDepartmentChange() {
+            const deptId = document.getElementById('departmentSelect').value;
+            const classSelect = document.getElementById('classSelect');
+
+            // Clear
+            classSelect.innerHTML = '<option value="">-- Select --</option>';
+            document.getElementById('unitSelect').innerHTML = '<option value="">-- Select --</option>';
+            document.getElementById('studentList').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Select a class</td></tr>';
+            attendanceData = {};
+
+            if (!deptId) return;
+
+            try {
+                const response = await ApiModule.getDepartmentClasses(deptId);
+                response.classes.forEach(cls => {
+                    const option = document.createElement('option');
+                    option.value = cls.id;
+                    option.textContent = cls.name;
+                    classSelect.appendChild(option);
+                });
+            } catch (error) {
+                showAlert('Error loading classes: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Load units and students
+         */
+        async function onFilterChange() {
+            const classId = document.getElementById('classSelect').value;
+
+            if (!classId) {
+                document.getElementById('studentList').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Select a class</td></tr>';
+                return;
+            }
+
+            try {
+                // Load units
+                const unitsResponse = await ApiModule.getClassUnits(classId);
+                const unitSelect = document.getElementById('unitSelect');
+                unitSelect.innerHTML = '<option value="">-- Select --</option>';
+
+                unitsResponse.units.forEach(unit => {
+                    const option = document.createElement('option');
+                    option.value = unit.unit_id;
+                    option.textContent = unit.units.code + ' - ' + unit.units.title;
+                    unitSelect.appendChild(option);
+                });
+
+                // Load students
+                await loadStudents(classId);
+            } catch (error) {
+                showAlert('Error loading units: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Load students for class
+         */
+        async function loadStudents(classId) {
+            try {
+                const response = await ApiModule.getClassStudents(classId);
+                const tbody = document.getElementById('studentList');
+
+                if (response.students.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No students found</td></tr>';
+                    return;
+                }
+
+                // Initialize attendance data
+                attendanceData = {};
+                response.students.forEach(student => {
+                    attendanceData[student.id] = 'absent'; // Default to absent
+                });
+
+                // Build table
+                tbody.innerHTML = response.students.map(student => `
+                    <tr>
+                        <td>${student.admission_number}</td>
+                        <td>${student.full_name}</td>
+                        <td style="text-align: center;">
+                            <button 
+                                class="attendance-checkbox status-absent"
+                                onclick="toggleAttendance(${student.id}, 'present')"
+                                data-student-id="${student.id}"
+                                data-status="absent"
+                                style="border: none; background: none; cursor: pointer; font-size: 1.5rem; padding: 0;"
+                            >✓</button>
+                        </td>
+                        <td style="text-align: center;">
+                            <button 
+                                class="attendance-checkbox status-absent"
+                                onclick="toggleAttendance(${student.id}, 'absent')"
+                                data-student-id="${student.id}"
+                                data-status="absent"
+                                style="border: none; background: none; cursor: pointer; font-size: 1.5rem; padding: 0;"
+                            >✕</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                showAlert('Error loading students: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * Toggle attendance status
+         */
+        function toggleAttendance(studentId, newStatus) {
+            attendanceData[studentId] = newStatus;
+            
+            // Update button styles
+            const row = document.querySelector(`[data-student-id="${studentId}"]`).parentElement.parentElement;
+            const presentBtn = row.querySelector('button:nth-of-type(1)');
+            const absentBtn = row.querySelector('button:nth-of-type(2)');
+
+            presentBtn.className = newStatus === 'present' ? 'status-present' : 'status-absent';
+            absentBtn.className = newStatus === 'absent' ? 'status-present' : 'status-absent';
+        }
+
+        /**
+         * Submit attendance
+         */
+        async function submitAttendance() {
+            const classId = document.getElementById('classSelect').value;
+            const unitId = document.getElementById('unitSelect').value;
+            const week = document.getElementById('weekSelect').value;
+            const lesson = document.getElementById('lessonSelect').value;
+
+            if (!classId || !unitId || !week || !lesson) {
+                showAlert('Please fill in all filters', 'warning');
+                return;
+            }
+
+            if (Object.keys(attendanceData).length === 0) {
+                showAlert('No students to mark', 'warning');
+                return;
+            }
+
+            try {
+                const records = Object.keys(attendanceData).map(studentId => ({
+                    student_id: parseInt(studentId),
+                    unit_id: parseInt(unitId),
+                    week: parseInt(week),
+                    lesson,
+                    status: attendanceData[studentId]
+                }));
+
+                const response = await ApiModule.submitAttendance(
+                    currentUser.id,
+                    parseInt(classId),
+                    parseInt(unitId),
+                    parseInt(week),
+                    lesson,
+                    records
+                );
+
+                showAlert('Attendance submitted successfully!', 'success');
+                document.getElementById('submitBtn').disabled = true;
+                document.getElementById('submitBtn').textContent = 'Submitted';
+            } catch (error) {
+                showAlert('Error submitting attendance: ' + error.message, 'danger');
+            }
+        }
+
+        /**
+         * View attendance
+         */
+        function viewAttendance() {
+            const classId = document.getElementById('classSelect').value;
+            const unitId = document.getElementById('unitSelect').value;
+            const week = document.getElementById('weekSelect').value;
+            const lesson = document.getElementById('lessonSelect').value;
+
+            if (!classId || !unitId || !week || !lesson) {
+                showAlert('Please fill in all filters', 'warning');
+                return;
+            }
+
+            // Navigate to view page
+            window.location.href = `view-attendance.html?classId=${classId}&unitId=${unitId}&week=${week}&lesson=${lesson}`;
+        }
+
+        /**
+         * Show alert
+         */
+        function showAlert(message, type = 'info') {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        /**
+         * Logout
+         */
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await AuthModule.logout();
+            window.location.href = 'index.html';
+        });
+
+        /**
+         * Populate weeks
+         */
+        function populateWeeks() {
+            const select = document.getElementById('weekSelect');
+            for (let i = 1; i <= 52; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `Week ${i}`;
+                select.appendChild(option);
+            }
+        }
+
+        // Initialize
+        populateWeeks();
+        initPage();
+    </script>
+</body>
+</html>
